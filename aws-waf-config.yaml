@@ -1,0 +1,309 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: WAFv2 configuration with rate limiting, IP blacklisting, SQL injection protection, DDoS protection, and SSRF protection
+
+Parameters:
+  ResourceArn:
+    Description: ARN of the resource to protect (ALB, CloudFront, or API Gateway)
+    Type: String
+
+  RateLimit:
+    Description: Rate limit threshold (requests per 5 minutes)
+    Type: Number
+    Default: 2000
+    MinValue: 100
+    MaxValue: 2000000
+
+Resources:
+  # IP Set for Blacklisted IPs
+  BlacklistedIPSet:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name: BlacklistedIPs
+      Description: IP addresses to blacklist
+      Scope: REGIONAL
+      IPAddressVersion: IPV4
+      Addresses:
+        - 192.0.2.100/32 # Example malicious IP
+        - 198.51.100.50/32 # Example malicious IP
+        - 203.0.113.25/32 # Example malicious IP
+
+  # Web ACL with multiple protection rules
+  SecurityWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: SecurityWebACL
+      Description: WAFv2 Web ACL with rate limiting, IP blacklisting, SQL injection, and DDoS protection
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      Rules:
+        # Rule 1: IP Reputation List (DDoS Protection)
+        - Name: AWSManagedRulesAmazonIpReputationList
+          Priority: 0
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesAmazonIpReputationListMetric
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AmazonIpReputationList
+              ExcludedRules: []
+
+        # Rule 2: Common Rule Set (SQL Injection and other vulnerabilities) - 2021 OWASP top 10
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 1
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesCommonRuleSetMetric
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              ExcludedRules:
+                - Name: SizeRestrictions_BODY
+                - Name: GenericRFI_BODY
+
+        # Rule 3: Known Bad Inputs (Additional SQL Injection Protection)
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesKnownBadInputsMetric
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+
+        # Rule 4: Custom IP Blacklist Rule
+        - Name: BlacklistCustomIPs
+          Priority: 3
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: BlacklistedIPResponse
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: BlacklistCustomIPsMetric
+          Statement:
+            IPSetReferenceStatement:
+              Arn: !GetAtt BlacklistedIPSet.Arn
+
+        # Rule 5: Rate Limiting
+        - Name: RateLimitRule
+          Priority: 4
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 429
+                CustomResponseBodyKey: RateLimitResponse
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitRuleMetric
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref RateLimit
+              AggregateKeyType: IP
+
+        # Rule 6: SQL Injection Protection (Custom Rule)
+        - Name: SQLInjectionProtection
+          Priority: 5
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: SQLInjectionResponse
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: SQLInjectionProtectionMetric
+          Statement:
+            OrStatement:
+              Statements:
+                - ByteMatchStatement:
+                    SearchString: 'union'
+                    FieldToMatch:
+                      QueryString: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: CONTAINS
+                - ByteMatchStatement:
+                    SearchString: 'select'
+                    FieldToMatch:
+                      QueryString: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: CONTAINS
+                - ByteMatchStatement:
+                    SearchString: 'drop'
+                    FieldToMatch:
+                      QueryString: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: CONTAINS
+
+        # Rule 7: SSRF (Server-Side Request Forgery) Protection - 2021 OWASP top 10
+        - Name: SSRFProtection
+          Priority: 6
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: SSRFResponse
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: SSRFProtectionMetric
+          Statement:
+            OrStatement:
+              Statements:
+                # Block requests to private IP ranges
+                - ByteMatchStatement:
+                    SearchString: '127.0.0.1'
+                    FieldToMatch:
+                      QueryString: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+                    PositionalConstraint: CONTAINS
+                - ByteMatchStatement:
+                    SearchString: 'localhost'
+                    FieldToMatch:
+                      QueryString: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: CONTAINS
+                - ByteMatchStatement:
+                    SearchString: '169.254.169.254'
+                    FieldToMatch:
+                      QueryString: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+                    PositionalConstraint: CONTAINS
+                - ByteMatchStatement:
+                    SearchString: '10.'
+                    FieldToMatch:
+                      QueryString: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+                    PositionalConstraint: CONTAINS
+                - ByteMatchStatement:
+                    SearchString: '172.16'
+                    FieldToMatch:
+                      QueryString: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+                    PositionalConstraint: CONTAINS
+                - ByteMatchStatement:
+                    SearchString: '192.168'
+                    FieldToMatch:
+                      QueryString: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+                    PositionalConstraint: CONTAINS
+                # Block file:// protocol
+                - ByteMatchStatement:
+                    SearchString: 'file://'
+                    FieldToMatch:
+                      QueryString: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: CONTAINS
+                # Block gopher:// protocol
+                - ByteMatchStatement:
+                    SearchString: 'gopher://'
+                    FieldToMatch:
+                      QueryString: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: CONTAINS
+
+      CustomResponseBodies:
+        BlacklistedIPResponse:
+          Content: 'Your IP address has been blacklisted due to suspicious activity.'
+          ContentType: TEXT_PLAIN
+        RateLimitResponse:
+          Content: 'Too many requests. Please try again later.'
+          ContentType: TEXT_PLAIN
+        SQLInjectionResponse:
+          Content: 'Request blocked due to potential SQL injection attack.'
+          ContentType: TEXT_PLAIN
+
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: SecurityWebACLMetric
+
+  # CloudWatch Log Group for WAF Logs
+  WAFLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/wafv2/${SecurityWebACL}'
+      RetentionInDays: 30
+
+  # WAF Logging Configuration
+  WAFLogging:
+    Type: AWS::WAFv2::LoggingConfiguration
+    Properties:
+      ResourceArn: !GetAtt SecurityWebACL.Arn
+      LogDestinationConfigs:
+        - !GetAtt WAFLogGroup.Arn
+      LoggingFilter:
+        DefaultBehavior: KEEP
+        Filters:
+          - Behavior: KEEP
+            Condition:
+              ActionCondition:
+                Action: BLOCK
+            RequiredAttributes:
+              - TERMINATINGRULE_ID
+              - TERMINATINGRULE_TYPE
+              - MATCHED_RULE
+
+  WebACLAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Ref ResourceArn
+      WebACLArn: !GetAtt SecurityWebACL.Arn
+
+Outputs:
+  WebACLArn:
+    Description: ARN of the Web ACL
+    Value: !GetAtt SecurityWebACL.Arn
+
+  WebACLId:
+    Description: ID of the Web ACL
+    Value: !GetAtt SecurityWebACL.Id
+
+  BlacklistedIPSetArn:
+    Description: ARN of the Blacklisted IP Set
+    Value: !GetAtt BlacklistedIPSet.Arn
+
+  WAFLogGroupName:
+    Description: CloudWatch Log Group for WAF logs
+    Value: !Ref WAFLogGroup
+
+  AttachmentCommand:
+    Description: Command to attach WAF to resource (replace RESOURCE_ARN)
+    Value: 'aws wafv2 associate-web-acl --web-acl-arn <output-WebACLArn> --resource-arn <RESOURCE_ARN> --region us-east-1'
