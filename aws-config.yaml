@@ -94,12 +94,39 @@ Resources:
         - Key: Name
           Value: MySecurityGroup
 
+    MyEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: EC2InstanceRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+      Tags:
+        - Key: Name
+          Value: EC2InstanceRole
+
+  MyInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref MyEC2Role
+
+
   MyEC2Instance:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t3.micro
       KeyName: !Ref KeyName
       ImageId: !Ref LatestAmiId
+      IamInstanceProfile: !Ref MyInstanceProfile
       SubnetId: !Ref PublicSubnet
       SecurityGroupIds:
         - !Ref MySecurityGroup
