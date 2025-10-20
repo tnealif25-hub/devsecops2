@@ -88,11 +88,34 @@ Resources:
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
+        
           ToPort: 22
           CidrIp: !Ref TrustedIP
       Tags:
         - Key: Name
           Value: MySecurityGroup
+          
+  EC2InstanceRole:                     
+  Type: AWS::IAM::Role
+    Properties:
+      RoleName: EC2StopStartRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:                  
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+
 
   MyEC2Instance:
     Type: AWS::EC2::Instance
