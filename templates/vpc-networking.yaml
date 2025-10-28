@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'DevSecOps - Reusable VPC w/ Public/Private Subnets, Internet Gateway, and Route Tables'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: Environment Name (i.e 1st tier, 2nd tier, 3rd tier)
+    AllowedValues:
+      - first
+      - second
+      - third
+    Default: test
+
+  ProjectName:
+    Type: 'Cyber Byte'
+    Description: 'DevSecOps'
+    MinLength: 1
+    MaxLength: 32
+
+    VpcCidr:
+      Type: String
+      Description: CIDR block for VPC
+      Default: 10.0.0.0/16
+      AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+
+    PublicSubnetCidr:
+      Type: String
+      Description: CIDR block for public subnet
+      Default: 10.0.1.0/24
+      AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+
+    PrivateSubnetCidr:
+      Type: String
+      Description: CIDR block for public subnet
+      Default: 10.0.2.0/24
+      AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+
+    EnableFlowLogs:
+      Type: String
+      Description: Enable VPC Flow Logs for security monitoring
+      AllowedValues:
+        - 'true'
+        - 'false'
+      Default: 'true'
+
+Resources:
+  #--------------
+  # VPC
+  # -------------
+  MyVPC:
+    Type: AWS::EC2:VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${EnvironmentName}--vpc'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: !Ref ProjectName
+  #--------------
+  # Internet Gateway
+  # -------------
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub `${ProjectName}-${EnvironmentName}-igw`
+        - Key: Environment
+          Value: !Ref EnvironmentName
+  AttachIGW:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref InternetGateway
+  #--------------
+  # Public Subnet
+  # -------------
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref PublicSubnetCidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags: 
+        - Key: Name
+          Value: !Sub `${ProjectName}-${EnvironmentName}-public-subnet`
+        - Key: Type
+          Value: Public
+        - Key: Environment
+          Value: !Ref EnvironmentName
+  #--------------
+  # Private Subnet
+  # -------------
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: !Ref PrivateSubnetCidr
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !GetAZs [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub `${ProjectName}-${EnvironmentName}-private-subnet`
+        - Key: Type
+          Value: Private
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  #--------------
+  # Private Route Table
+  # -------------
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub `${ProjectName}-${EnvironmentName}-private-rt`
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+Outputs:
+  VpcId: 
+    Description: VPC ID
+    Value: !Ref MyVPC
+    Export:
+      Name: !Sub `${ProjectName}-${EnvironmentName}-vpc-cidr`
+
+  VpcCidr:
+    Description: VPC CIDR Block
+    Value: !GetAtt MyVPC.CidrBock
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-vpc-cidr'
+  
+  PublicSubnetId:
+    Description: Public Subnet ID
+    Value: !Ref PublicSubnet
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-public-subnet-id'
+
+  PrivateSubnetId:
+    Description: Private Subnet ID
+    Value: !Ref PublicSubnet
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-private-subnet-id'
+
+  InternetGatewayId:
+    Description: Internet Gateway ID
+    Value: !Ref InternetGateway
+    Export:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-igw-id'

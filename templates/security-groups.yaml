@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3 bucket, VPC with Public/Private subnets, Internet Gateway, Security Group, and EC2 Instance
+
+# -------------------
+# Security Groups
+# -------------------
+MySecurityGroup:
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+    GroupName: MySecurityGroup
+    GroupDescription: Security group for EC2 instance with SSH and HTTP access
+    VpcId: !Ref MyVPC
+    SecurityGroupIngress:
+      # SSH Access
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: !Ref TrustedIP
+        Description: SSH from trusted IP
+      # HTTP Access
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+        Description: HTTP from anywhere
+      # HTTPS Access
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+        Description: HTTPS from anywhere
+    SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+        Description: Allow all outbound traffic
+    Tags:
+      - Key: Name
+        Value: MySecurityGroup

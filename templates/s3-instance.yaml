@@ -1,0 +1,17 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'DevSecOps - Reusable VPC w/ Public/Private Subnets, Internet Gateway, and Route Tables'
+
+    Parameters:
+        TrustedIP:
+        Description: 'Trusted IP for SSH access'
+        Type: String
+        Default: '0.0.0.0/0'
+
+    Resources:
+        MyS3Bucket:
+            Type: AWS::S3::Bucket
+            Properties:
+            VersioningConfiguration:
+                Status: Enabled
+            BucketName: my-cfn-s3-bucket-devsecops2
+
